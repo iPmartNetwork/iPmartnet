@@ -4,7 +4,7 @@ set -Eeuo pipefail
 ########################################
 # iPmartnet Ultimate Installer
 # install | update | uninstall
-# Release Binary -> Fallback to Source
+# Release Binary -> Source Build Fallback
 ########################################
 
 PROJECT="ipmartnet"
@@ -30,15 +30,21 @@ GO_VERSION="1.21.6"
 
 mkdir -p "$LOG_DIR"
 
-log() { echo "[iPmartnet] $1" | tee -a "$LOG_FILE"; }
-die() { log "❌ ERROR: $1"; exit 1; }
+log() {
+  echo "[iPmartnet] $1" | tee -a "$LOG_FILE"
+}
+
+die() {
+  log "❌ ERROR: $1"
+  exit 1
+}
 
 ########################################
 # Root & utils
 ########################################
 
 require_root() {
-  [[ $EUID -eq 0 ]] || die "Run as root"
+  [[ $EUID -eq 0 ]] || die "Please run as root"
 }
 
 cmd_exists() {
@@ -84,7 +90,7 @@ install_deps() {
 }
 
 ########################################
-# Go install (only if needed)
+# Install Go (if missing)
 ########################################
 
 install_go() {
@@ -93,33 +99,34 @@ install_go() {
     return
   fi
 
-  log "Installing Go $GO_VERSION..."
-  local ARCH_GO
+  log "Installing Go ${GO_VERSION}..."
   case "$ARCH" in
-    amd64) ARCH_GO="amd64" ;;
-    arm64) ARCH_GO="arm64" ;;
+    amd64) GO_ARCH="amd64" ;;
+    arm64) GO_ARCH="arm64" ;;
   esac
 
-  curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${ARCH_GO}.tar.gz" -o /tmp/go.tgz
+  curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz" -o /tmp/go.tgz
   rm -rf /usr/local/go
   tar -C /usr/local -xzf /tmp/go.tgz
   export PATH=$PATH:/usr/local/go/bin
+
+  log "Go installed successfully"
 }
 
 ########################################
-# Network checks
+# Network tuning
 ########################################
-
-check_port_free() {
-  local port="$1"
-  lsof -i ":$port" >/dev/null 2>&1 && die "Port $port already in use"
-}
 
 apply_sysctl() {
   log "Applying network optimizations..."
   sysctl -w net.core.rmem_max=2500000 >/dev/null
   sysctl -w net.core.wmem_max=2500000 >/dev/null
   sysctl -w net.ipv4.tcp_fastopen=3 >/dev/null
+}
+
+check_port_free() {
+  local port="$1"
+  lsof -i ":$port" >/dev/null 2>&1 && die "Port $port is already in use"
 }
 
 ########################################
@@ -136,30 +143,40 @@ prepare_dirs() {
 
 download_binary() {
   local URL="https://github.com/${GITHUB_REPO}/releases/latest/download/ipmartnet-linux-${ARCH}"
-  log "Trying release binary: $URL"
+  log "Trying to download release binary..."
+  log "URL: $URL"
 
   if curl -fL --ipv4 "$URL" -o "$BIN_DIR/ipmartnet"; then
     chmod +x "$BIN_DIR/ipmartnet"
     log "Installed from GitHub Release"
     return 0
   fi
+
+  log "Release binary not found"
   return 1
 }
 
 clone_and_build() {
   log "Fallback: building from source"
+  log "This may take 1–3 minutes, please wait..."
 
   install_go
 
+  log "Cloning repository..."
   rm -rf "$SRC_DIR"
   git clone --depth=1 "$REPO_URL" "$SRC_DIR" || die "Git clone failed"
 
   cd "$SRC_DIR"
-  export CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH"
-  go build -o "$BIN_DIR/ipmartnet" ./cmd/ipmartnet || die "Build failed"
-  chmod +x "$BIN_DIR/ipmartnet"
 
-  log "Built iPmartnet from source"
+  log "Building iPmartnet..."
+  export CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH"
+
+  if go build -v -o "$BIN_DIR/ipmartnet" ./cmd/ipmartnet; then
+    chmod +x "$BIN_DIR/ipmartnet"
+    log "Build completed successfully"
+  else
+    die "Go build failed"
+  fi
 }
 
 install_ipmartnet() {
@@ -167,7 +184,7 @@ install_ipmartnet() {
 }
 
 ########################################
-# User input (interactive)
+# User input
 ########################################
 
 select_role() {
@@ -287,7 +304,7 @@ action_uninstall() {
   rm -f "$SERVICE_FILE"
   rm -rf "$INSTALL_DIR" "$LOG_DIR"
   systemctl daemon-reload
-  log "✅ Removed"
+  log "✅ iPmartnet removed"
 }
 
 ########################################
