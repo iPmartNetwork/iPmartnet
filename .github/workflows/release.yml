@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   build:
+    name: Build and Upload Release
     runs-on: ubuntu-latest
 
     steps:
@@ -22,7 +23,7 @@ jobs:
           go-version: "1.21"
           cache: true
 
-      - name: Download Go dependencies
+      - name: Prepare Go modules
         run: |
           go mod tidy
           go mod download
